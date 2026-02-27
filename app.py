@@ -1,173 +1,467 @@
 #!/usr/bin/env python3
 """
-Advanced CTF Challenge: File Upload Mayhem
-Multiple exploitation stages with intentional vulnerabilities
+Pixel Prophet - Advanced CTF Challenge
+A multi-layer file upload exploitation challenge
 """
 
-from flask import (
-    Flask, request, render_template, 
-    render_template_string, session, make_response, redirect, jsonify, send_file
-)
-from werkzeug.utils import secure_filename
-from PIL import Image
-import sqlite3
 import os
 import subprocess
-import time
+import base64
+import pickle
 import hashlib
-from datetime import datetime
+import time
+import random
+import string
+import sqlite3
 import logging
-from logging.handlers import RotatingFileHandler
-import json
+from datetime import datetime
 from io import BytesIO
-import threading
-
-app = Flask(__name__)
-app.secret_key = 'super_secret_key_2024'  # Intentionally weak - CTF vulnerability
-
-# Configuration with intentional vulnerabilities
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
-app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_FILE_DIR'] = 'flask_session'
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_USE_SIGNER'] = False  # VULNERABILITY: No session signing
-
-# Create necessary directories
-for directory in [app.config['UPLOAD_FOLDER'], app.config['SESSION_FILE_DIR'], 'logs', 'uploads', 'static']:
-    os.makedirs(directory, exist_ok=True)
+from flask import (
+    Flask, request, render_template,
+    render_template_string, session, make_response,
+    jsonify, redirect, url_for
+)
+from werkzeug.utils import secure_filename
+from PIL import Image, ImageFilter
+import re
 
 # Setup logging
-def setup_logging():
-    main_logger = logging.getLogger('main')
-    main_logger.setLevel(logging.DEBUG)
-    
-    detailed_formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    main_handler = RotatingFileHandler('logs/app.log', maxBytes=10*1024*1024, backupCount=5)
-    main_handler.setFormatter(detailed_formatter)
-    main_logger.addHandler(main_handler)
-    
-    return main_logger
+main_logger = logging.getLogger('app')
+logging.basicConfig(level=logging.INFO, filename='logs/app.log', format='%(asctime)s - %(levelname)s - %(message)s')
 
-main_logger = setup_logging()
+app = Flask(__name__)
+app.secret_key = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_PERMANENT'] = False
 
-# Initialize database
-def init_db():
-    conn = sqlite3.connect('vulnerable.db')
-    c = conn.cursor()
+# Advanced security configurations (all bypassable)
+ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'}
+ALLOWED_MIMES = {'image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/webp'}
+
+# Rate limiting (bypassable)
+RATE_LIMIT = {}
+BLACKLISTED_IPS = set()
+
+# Ensure directories exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs('flask_session', exist_ok=True)
+os.makedirs('flags', exist_ok=True)
+os.makedirs('logs', exist_ok=True)
+
+# ==================== LAYER 1: WAF Simulation ====================
+
+class WAF:
+    @staticmethod
+    def check_request(ip, endpoint):
+        """Simulate WAF with bypassable rules"""
+        # Rate limiting (bypass with X-Forwarded-For)
+        if ip in RATE_LIMIT:
+            if time.time() - RATE_LIMIT[ip] < 1:
+                return False
+        RATE_LIMIT[ip] = time.time()
+        
+        # IP blacklisting (bypass with spoofed headers)
+        if ip in BLACKLISTED_IPS:
+            return False
+            
+        return True
+    
+    @staticmethod
+    def sanitize_input(data):
+        """Multiple sanitization layers (all bypassable)"""
+        # Layer 1: Remove common patterns
+        data = data.replace('../', '')
+        data = data.replace('..\\', '')
+        data = data.replace(';', '')
+        data = data.replace('|', '')
+        data = data.replace('&', '')
+        
+        # Layer 2: URL decode bypass
+        data = data.replace('%2e%2e%2f', '')
+        data = data.replace('%252e%252e%252f', '')
+        
+        # Layer 3: Unicode normalization bypass
+        data = data.replace('\u2026', '')
+        
+        return data
+
+waf = WAF()
+
+# ==================== LAYER 2: Image Processing ====================
+
+class ImageProcessor:
+    @staticmethod
+    def validate_image(file):
+        """Multi-layer image validation"""
+        # Layer 1: Check extension
+        if '.' not in file.filename:
+            return False, 'Invalid filename'
+        
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            return False, f'Extension .{ext} not allowed'
+        
+        # Layer 2: Check MIME type
+        if file.mimetype not in ALLOWED_MIMES:
+            return False, f'MIME type {file.mimetype} not allowed'
+        
+        # Layer 3: Magic bytes
+        magic_bytes = file.read(8)
+        file.seek(0)
+        
+        if ext in ['jpg', 'jpeg'] and magic_bytes[:2] != b'\xff\xd8':
+            return False, 'Invalid JPEG header'
+        elif ext == 'png' and magic_bytes[:8] != b'\x89PNG\r\n\x1a\n':
+            return False, 'Invalid PNG header'
+        elif ext == 'gif' and magic_bytes[:6] not in [b'GIF87a', b'GIF89a']:
+            return False, 'Invalid GIF header'
+        
+        # Layer 4: Try to open with PIL (preserves metadata)
+        try:
+            img = Image.open(file)
+            # Generate unique filename
+            filename = hashlib.sha256(
+                file.filename.encode() + str(time.time()).encode()
+            ).hexdigest()[:16] + '.' + ext
+            
+            # Process based on image type
+            if ext in ['jpg', 'jpeg']:
+                # VULNERABILITY: Preserves EXIF data with PHP
+                img.save(os.path.join(app.config['UPLOAD_FOLDER'], filename), 
+                        'JPEG', quality=85, exif=img.info.get('exif', b''))
+            elif ext == 'png':
+                # VULNERABILITY: Preserves tEXt chunks
+                img.save(os.path.join(app.config['UPLOAD_FOLDER'], filename), 'PNG')
+            elif ext == 'gif':
+                # VULNERABILITY: Preserves application extensions
+                img.save(os.path.join(app.config['UPLOAD_FOLDER'], filename), 'GIF')
+            
+            return True, filename
+            
+        except Exception as e:
+            return False, f'Image processing failed: {str(e)}'
+
+processor = ImageProcessor()
+
+# ==================== LAYER 3: Advanced Authentication ====================
+
+class AuthManager:
+    def __init__(self):
+        self.users = {
+            'admin': {
+                'password': self.hash_password('super_secret_admin_2024'),
+                '2fa_secret': self.generate_2fa(),
+                'role': 'admin'
+            },
+            'guest': {
+                'password': self.hash_password('guest'),
+                '2fa_secret': None,
+                'role': 'user'
+            }
+        }
+        self.tokens = {}
+        self.sessions = {}
+    
+    def hash_password(self, password):
+        """Weak hashing (vulnerable to timing attacks)"""
+        time.sleep(0.01)  # Timing attack vector
+        return hashlib.md5(password.encode()).hexdigest()
+    
+    def generate_2fa(self):
+        """Predictable 2FA (vulnerable)"""
+        return str(int(time.time()) % 1000000).zfill(6)
+    
+    def authenticate(self, username, password, token=None):
+        if username not in self.users:
+            return False
+        
+        user = self.users[username]
+        if user['password'] != self.hash_password(password):
+            return False
+        
+        # VULNERABILITY: 2FA bypass possible
+        if user['2fa_secret'] and token != user['2fa_secret']:
+            return False
+        
+        # Generate session token
+        session_token = hashlib.sha256(
+            (username + str(time.time())).encode()
+        ).hexdigest()
+        
+        self.tokens[session_token] = {
+            'username': username,
+            'role': user['role'],
+            'expires': time.time() + 3600
+        }
+        
+        return session_token
+    
+    def verify_token(self, token):
+        if token not in self.tokens:
+            return None
+        if self.tokens[token]['expires'] < time.time():
+            del self.tokens[token]
+            return None
+        return self.tokens[token]
+
+auth = AuthManager()
+
+# ==================== LAYER 4: API Endpoints ====================
+
+@app.route('/')
+def index():
+    """Main page with hidden clues"""
+    return render_template('index.html', 
+                         version='2.5.3-beta',
+                         build='2024.03.15-19:42',
+                         server=request.headers.get('Server', 'Unknown'))
+
+@app.route('/api/v1/upload', methods=['POST'])
+def api_upload():
+    """VULNERABLE: File upload endpoint"""
+    # WAF check
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if not waf.check_request(client_ip, '/api/v1/upload'):
+        return jsonify({'error': 'Rate limited'}), 429
+    
+    # Authentication check
+    auth_token = request.headers.get('X-Auth-Token')
+    if not auth_token or not auth.verify_token(auth_token):
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    # Process image
+    success, result = processor.validate_image(file)
+    if not success:
+        return jsonify({'error': result}), 400
+    
+    # Return file info
+    return jsonify({
+        'status': 'success',
+        'filename': result,
+        'url': f'/uploads/{result}',
+        'size': os.path.getsize(os.path.join(app.config['UPLOAD_FOLDER'], result))
+    })
+
+@app.route('/api/v1/process')
+def api_process():
+    """VULNERABLE: Image processing with command injection"""
+    # Authentication check
+    auth_token = request.headers.get('X-Auth-Token')
+    user_data = auth.verify_token(auth_token)
+    
+    if not user_data or user_data['role'] != 'admin':
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    filename = request.args.get('file', '')
+    operation = request.args.get('op', 'resize')
+    
+    # WAF sanitization (bypassable)
+    filename = waf.sanitize_input(filename)
+    operation = waf.sanitize_input(operation)
+    
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
     
     try:
-        c.execute('''CREATE TABLE IF NOT EXISTS users
-                     (id INTEGER PRIMARY KEY, username TEXT, password TEXT, email TEXT, role TEXT)''')
+        # VULNERABILITY: Command injection in imagemagick
+        # Players can do: ; cat /etc/passwd #
+        cmd = f'convert {filepath} -{operation} output.jpg 2>&1'
+        result = subprocess.check_output(cmd, shell=True, timeout=5)
         
-        c.execute('''CREATE TABLE IF NOT EXISTS posts
-                     (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, content TEXT, created_at TEXT)''')
-        
-        try:
-            c.execute("INSERT INTO users VALUES (1, 'admin', 'admin123', 'admin@vulnerable.local', 'admin')")
-            c.execute("INSERT INTO users VALUES (2, 'user1', 'password', 'user1@vulnerable.local', 'user')")
-            c.execute("INSERT INTO users VALUES (3, 'user2', '12345', 'user2@vulnerable.local', 'user')")
-        except:
-            pass
-        
-        conn.commit()
+        return jsonify({
+            'status': 'success',
+            'output': result.decode(),
+            'operation': operation
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Processing timeout'}), 500
     except Exception as e:
-        main_logger.error(f"Database initialization error: {str(e)}")
-    finally:
-        conn.close()
+        return jsonify({'error': str(e)}), 500
 
-init_db()
+@app.route('/api/v1/auth/login', methods=['POST'])
+def api_login():
+    """VULNERABLE: Authentication endpoint"""
+    data = request.get_json()
+    
+    username = data.get('username', '')
+    password = data.get('password', '')
+    token = data.get('2fa_token', '')
+    
+    # VULNERABILITY: Timing attack possible
+    # Also vulnerable to SQL injection if we used SQL
+    session_token = auth.authenticate(username, password, token)
+    
+    if session_token:
+        return jsonify({
+            'status': 'success',
+            'token': session_token,
+            'role': auth.tokens[session_token]['role']
+        })
+    else:
+        return jsonify({'error': 'Authentication failed'}), 401
 
-# ========== VULNERABILITY 1: INFORMATION DISCLOSURE ==========
+@app.route('/api/v1/admin/debug')
+def api_debug():
+    """VULNERABLE: Debug endpoint with RCE"""
+    # Check admin token
+    auth_token = request.headers.get('X-Auth-Token')
+    user_data = auth.verify_token(auth_token)
+    
+    if not user_data or user_data['role'] != 'admin':
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    cmd = request.args.get('cmd', 'id')
+    
+    # VULNERABILITY: Direct command execution
+    try:
+        output = subprocess.check_output(cmd, shell=True, timeout=5)
+        return jsonify({
+            'status': 'success',
+            'command': cmd,
+            'output': base64.b64encode(output).decode()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/v1/admin/session')
+def api_session():
+    """VULNERABLE: Session manipulation"""
+    # Check admin token
+    auth_token = request.headers.get('X-Auth-Token')
+    user_data = auth.verify_token(auth_token)
+    
+    if not user_data or user_data['role'] != 'admin':
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    session_data = request.args.get('data', '')
+    
+    try:
+        # VULNERABILITY: Pickle deserialization
+        decoded = base64.b64decode(session_data)
+        obj = pickle.loads(decoded)
+        return jsonify({'status': 'success', 'data': str(obj)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/uploads/<path:filename>')
+def serve_upload(filename):
+    """Serve uploaded files"""
+    # WAF sanitization
+    filename = waf.sanitize_input(filename)
+    
+    # VULNERABILITY: Path traversal in filename
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    if os.path.exists(filepath):
+        return open(filepath, 'rb').read()
+    return 'File not found', 404
+
+@app.route('/logs')
+def view_logs():
+    """VULNERABLE: Log viewing with LFI"""
+    # Hidden endpoint - not documented
+    if request.remote_addr != '127.0.0.1':
+        return 'Access Denied', 403
+    
+    logfile = request.args.get('file', 'access.log')
+    
+    # VULNERABILITY: Path traversal
+    logpath = os.path.join('logs', logfile)
+    
+    if os.path.exists(logpath):
+        return f'<pre>{open(logpath).read()}</pre>'
+    return 'Log not found', 404
+
 @app.route('/robots.txt')
 def robots():
-    """VULNERABILITY: Discloses hidden administrator paths"""
-    return '''User-agent: *
-Disallow: /admin
-Disallow: /backup
-Disallow: /console
-Disallow: /flask_session
-Disallow: /config
-Allow: /static/uploads
+    """Information disclosure"""
+    return '''
+User-agent: *
+Disallow: /api/
+Disallow: /admin/
+Disallow: /logs/
+Disallow: /backup/
+
+# API documentation at /api/v1/docs
+# Version: 2.5.3-beta
+# Build: 2024.03.15-19:42
 '''
 
-@app.route('/backup')
+@app.route('/api/v1/docs')
+def api_docs():
+    """API documentation (leaks endpoints)"""
+    return jsonify({
+        'endpoints': [
+            {'path': '/api/v1/upload', 'method': 'POST', 'auth': 'required'},
+            {'path': '/api/v1/process', 'method': 'GET', 'auth': 'admin'},
+            {'path': '/api/v1/auth/login', 'method': 'POST', 'auth': 'none'},
+            {'path': '/api/v1/admin/debug', 'method': 'GET', 'auth': 'admin'},
+            {'path': '/api/v1/admin/session', 'method': 'GET', 'auth': 'admin'}
+        ],
+        'version': '2.5.3-beta',
+        'build': '2024.03.15-19:42'
+    })
+
+@app.route('/backup/')
 def backup():
-    """VULNERABILITY: Directory listing of sensitive backups"""
+    """Hidden backup directory"""
     return '''
-    <html>
-    <head><title>Backup Directory</title></head>
-    <body>
-    <h1>Backup Directory</h1>
-    <p>The following backups are available:</p>
+    <h1>Backups</h1>
     <ul>
-        <li><a href="/backup/app.py.bak">app.py.bak</a> - Application source code</li>
-        <li><a href="/backup/config.txt">config.txt</a> - Configuration file</li>
-        <li><a href="/backup/.htaccess">.htaccess</a> - Apache configuration</li>
-        <li><a href="/backup/database.bak">database.bak</a> - Database dump</li>
+        <li><a href="/backup/app.py.bak">app.py.bak</a></li>
+        <li><a href="/backup/config.json">config.json</a></li>
+        <li><a href="/backup/.env">.env</a></li>
     </ul>
-    </body>
-    </html>
     '''
 
 @app.route('/backup/app.py.bak')
 def backup_app():
-    """VULNERABILITY: Source code disclosure"""
-    try:
-        with open(__file__, 'r') as f:
-            return f.read()
-    except:
-        return "Backup not accessible", 404
+    """Source code leak"""
+    return open(__file__, 'r').read()
 
-@app.route('/backup/config.txt')
+@app.route('/backup/config.json')
 def backup_config():
-    """VULNERABILITY: Configuration and credential disclosure"""
-    config_content = f"""
-DATABASE_URL: sqlite:///vulnerable.db
-DATABASE_PASSWORD: admin123
-ADMIN_PASSWORD: flag{{info_disclosure_vulnerability}}
-API_KEY: sk-1234567890abcdefghij
-JWT_SECRET: very_secret_jwt_key_2024
-STRIPE_KEY: sk_test_123456789abcdef
-AWS_ACCESS_KEY: AKIAIOSFODNN7EXAMPLE
-AWS_SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-DATABASE_ADMIN_PASSWORD: root_db_pass_123
-ROOT_FLAG: flag{{source_code_exposed}}
-    """
-    return f"<pre>{config_content}</pre>"
+    """Config leak with credentials"""
+    return jsonify({
+        'database': {
+            'host': 'localhost',
+            'user': 'app_user',
+            'password': 'app_pass_2024'
+        },
+        'api_keys': {
+            'internal': 'sk_live_1234567890abcdef'
+        },
+        'debug': True,
+        'secret_key': app.secret_key
+    })
 
-@app.route('/backup/.htaccess')
-def backup_htaccess():
-    """VULNERABILITY: Apache configuration disclosure - shows PHP execution in uploads"""
-    htaccess = """
-# CRITICAL VULNERABILITY: Allows PHP execution on uploaded images
-AddType application/x-httpd-php .jpg .jpeg .png .gif
+@app.errorhandler(404)
+def not_found(error):
+    """Custom 404 page with hidden data"""
+    return render_template_string('''
+        <h1>404 - Not Found</h1>
+        <p>The requested resource was not found.</p>
+        <!-- Debug: Check /api/v1/docs for available endpoints -->
+        <!-- Server: {{ server }} -->
+        <!-- Time: {{ time }} -->
+    '''.format(
+        server=request.headers.get('Server', 'Unknown'),
+        time=time.time()
+    )), 404
 
-# Additional dangerous configurations
-php_flag display_errors on
-php_value max_execution_time 300
-php_value upload_max_filesize 100M
-
-# If .htaccess is placed in uploads folder, PHP code executes
-RewriteEngine On
-RewriteCond %{REQUEST_FILENAME} -f
-RewriteRule ^.*\\.(jpg|jpeg|png|gif)$ - [L]
-    """
-    return f"<pre>{htaccess}</pre>"
-
-@app.route('/backup/database.bak')
-def backup_database():
-    """VULNERABILITY: Database backup disclosure"""
-    try:
-        with open('vulnerable.db', 'rb') as f:
-            content = f.read()
-        return send_file(BytesIO(content), mimetype='application/octet-stream', download_name='vulnerable.db.bak')
-    except:
-        return "No backup available", 404
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
 
 # ========== VULNERABILITY 2: SQL INJECTION ==========
 @app.route('/login', methods=['GET', 'POST'])

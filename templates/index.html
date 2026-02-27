@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Prophet - CTF Challenge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 60px 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        p {
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid #00ff88;
+        }
+
+        .info-title {
+            font-weight: bold;
+            color: #00ff88;
+            margin-bottom: 10px;
+        }
+
+        a {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: transform 0.3s;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        a:hover {
+            transform: scale(1.05);
+            border-color: rgba(255, 255, 255, 0.6);
+        }
+
+        .meta {
+            font-size: 0.9rem;
+            color: #aaa;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎯 Pixel Prophet</h1>
+        <p>Advanced File Upload CTF Challenge</p>
+
+        <div class="info">
+            <div class="info-title">Challenge Objectives</div>
+            <p>Navigate through 5 exploitation stages to capture hidden flags</p>
+        </div>
+
+        <div class="info">
+            <div class="info-title">Test Credentials</div>
+            <p style="margin: 0; font-size: 0.95rem;">
+                <strong>Username:</strong> admin / guest<br>
+                <strong>Passwords:</strong> Check /api/v1/docs
+            </p>
+        </div>
+
+        <a href="/api/v1/auth/login">Start Challenge</a>
+        <a href="/api/v1/docs">View API Docs</a>
+        <a href="/robots.txt">Site Map</a>
+
+        <div class="meta">
+            <p>Version {{ version }} | Build {{ build }}</p>
+            <p>Server: {{ server }}</p>
+        </div>
+    </div>
+</body>
+
+</html>
