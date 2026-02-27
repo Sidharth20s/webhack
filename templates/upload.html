@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vulnerable App - File Upload</title>
+    <style>
+        body { font-family: Arial; background: #f4f4f4; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 50px auto; background: white; padding: 20px; border-radius: 5px; }
+        h1 { color: #333; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 3px; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>File Upload</h1>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="file" required>
+            <button type="submit">Upload</button>
+        </form>
+        <p><a href="/dashboard">Back to Dashboard</a></p>
+    </div>
+</body>
+</html>

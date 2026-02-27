@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vulnerable App - Dashboard</title>
+    <style>
+        body { font-family: Arial; background: #f4f4f4; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .header { background: white; padding: 20px; border-radius: 5px; margin-bottom: 20px; display: flex; justify-content: space-between; }
+        .header h1 { margin: 0; }
+        .header a { color: #007bff; text-decoration: none; }
+        .post { background: white; padding: 20px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #007bff; }
+        .search { background: white; padding: 20px; margin-bottom: 20px; border-radius: 5px; }
+        input[type="text"] { padding: 8px; width: 300px; border: 1px solid #ddd; }
+        button { padding: 8px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 3px; }
+        a { color: #007bff; text-decoration: none; }
+        .nav { background: white; padding: 10px; margin-bottom: 20px; border-radius: 5px; }
+        .nav a { margin: 0 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Vulnerable Practice App</h1>
+            <a href="/logout">Logout</a>
+        </div>
+        
+        <div class="nav">
+            <strong>Welcome, {{ session.get('username', 'Guest') }}</strong> | 
+            <a href="/dashboard">Dashboard</a> |
+            <a href="/upload">Upload File</a> |
+            <a href="/user-info?id=1">View User Info</a>
+        </div>
+        
+        <div class="search">
+            <h3>Search Posts</h3>
+            <form method="GET" action="/search">
+                <input type="text" name="q" placeholder="Search posts...">
+                <button type="submit">Search</button>
+            </form>
+        </div>
+        
+        <h2>Posts</h2>
+        {% for post in posts %}
+            <div class="post">
+                <h3>{{ post[2] }}</h3>
+                <p>{{ post[3] }}</p>
+                <small>Posted by User #{{ post[1] }} on {{ post[4] }}</small>
+            </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
