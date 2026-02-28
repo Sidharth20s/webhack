@@ -10,11 +10,11 @@ This application intentionally contains **5 major vulnerability categories** wit
 
 | # | Category | Type | Impact | Flag |
 |---|----------|------|--------|------|
-| 1 | Information Disclosure | CWE-200 | Credential/Config Leak | `flag{info_disclosure_vulnerability}` |
-| 2 | File Upload Bypass | CWE-434 | Remote Code Execution | `flag{polyglot_file_executed}` |
-| 3 | Path Traversal + SSTI | CWE-22 + CWE-1336 | Arbitrary File Read/Execute | `flag{path_traversal_ssti_rce}` |
-| 4 | SQL Injection | CWE-89 | Database Compromise | `flag{sql_injection_bypass}` |
-| 5 | Privilege Escalation | CWE-269 | System Compromise | `flag{privilege_escalation_suid}` |
+| 1 | Information Disclosure | CWE-200 | Credential/Config Leak | 
+| 2 | File Upload Bypass | CWE-434 | Remote Code Execution | 
+| 3 | Path Traversal + SSTI | CWE-22 + CWE-1336 | Arbitrary File Read/Execute |
+| 4 | SQL Injection | CWE-89 | Database Compromise | 
+| 5 | Privilege Escalation | CWE-269 | System Compromis
 
 ## 🚀 Quick Start
 
@@ -33,9 +33,9 @@ The application will start at `http://localhost:5000`
 ### Default Credentials
 
 ```
-admin / admin123
-user1 / password
-user2 / 12345
+admin / admin1234
+user1 / password1
+user2 / 1234567
 ```
 
 ## 🔓 Exploitation Guide
@@ -48,7 +48,7 @@ user2 / 12345
 - `/backup/app.py.bak` - Source code
 - `/backup/config.txt` - Credentials
 
-**Flag:** `flag{info_disclosure_vulnerability}`
+**Flag:** `flag{info_disclosure_vuln}`
 
 ### Stage 2: File Upload Bypass
 
@@ -63,7 +63,7 @@ curl -F "file=@shell.jpg" http://localhost:5000/upload
 curl "http://localhost:5000/static/uploads/shell.jpg?cmd=id"
 ```
 
-**Flag:** `flag{polyglot_file_executed}`
+**Flag:** `flag{polyglot_executed}`
 
 ### Stage 3: Path Traversal + SSTI
 
@@ -72,13 +72,13 @@ curl "http://localhost:5000/static/uploads/shell.jpg?cmd=id"
 curl "http://localhost:5000/view?file=....//../etc/passwd"
 ```
 
-**Flag:** `flag{path_traversal_ssti_rce}`
+**Flag:** `flag{path_traversal_ssti}`
 
 ### Stage 4: SQL Injection
 
 Login as: `admin' --`
 
-**Flag:** `flag{sql_injection_bypass}`
+**Flag:** `flag{sql_injection}`
 
 ### Stage 5: Privilege Escalation
 
