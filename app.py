@@ -50,6 +50,21 @@ os.makedirs('flask_session', exist_ok=True)
 os.makedirs('flags', exist_ok=True)
 os.makedirs('logs', exist_ok=True)
 
+def init_db():
+    conn = sqlite3.connect('vulnerable.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE,
+                    password TEXT,
+                    email TEXT,
+                    role TEXT DEFAULT 'user'
+                )''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
 # ==================== LAYER 1: WAF Simulation ====================
 
 class WAF:
@@ -210,10 +225,10 @@ auth = AuthManager()
 
 # ==================== LAYER 4: API Endpoints ====================
 
-@app.route('/')
+@app.route('/', endpoint='main_index')
 def index():
     """Main page with hidden clues"""
-    return render_template('index.html', 
+    return render_template('index.html',
                          version='2.5.3-beta',
                          build='2024.03.15-19:42',
                          server=request.headers.get('Server', 'Unknown'))
@@ -367,18 +382,18 @@ def serve_upload(filename):
         return open(filepath, 'rb').read()
     return 'File not found', 404
 
-@app.route('/logs')
+@app.route('/logs', endpoint='logs_lfi')
 def view_logs():
     """VULNERABLE: Log viewing with LFI"""
     # Hidden endpoint - not documented
     if request.remote_addr != '127.0.0.1':
         return 'Access Denied', 403
-    
+
     logfile = request.args.get('file', 'access.log')
-    
+
     # VULNERABILITY: Path traversal
     logpath = os.path.join('logs', logfile)
-    
+
     if os.path.exists(logpath):
         return f'<pre>{open(logpath).read()}</pre>'
     return 'Log not found', 404
@@ -388,14 +403,13 @@ def robots():
     """Information disclosure"""
     return '''
 User-agent: *
-Disallow: /api/
-Disallow: /admin/
-Disallow: /logs/
-Disallow: /backup/
+Disallow: /admin
+Disallow: /backup
+Disallow: /console
+Disallow: /secret
+Disallow: /credentials.txt
 
-# API documentation at /api/v1/docs
-# Version: 2.5.3-beta
-# Build: 2024.03.15-19:42
+# Hidden note: Check /backup/credentials.txt.bak
 '''
 
 @app.route('/api/v1/docs')
@@ -446,39 +460,92 @@ def backup_config():
         'secret_key': app.secret_key
     })
 
+@app.route('/secret/')
+def secret():
+    """Hidden directory with credentials"""
+    return '''
+    <h1>Secret Directory</h1>
+    <ul>
+        <li><a href="/secret/credentials.txt">credentials.txt</a></li>
+        <li><a href="/secret/config.php">config.php</a></li>
+    </ul>
+    '''
+
+
+@app.route('/secret/credentials.txt')
+def secret_credentials():
+    try:
+        return open('secret/credentials.txt', 'r').read()
+    except Exception:
+        return 'Not found', 404
+
+
+@app.route('/secret/config.php')
+def secret_config():
+    try:
+        return open('private/config.php', 'r').read()
+    except Exception:
+        return 'Not found', 404
+
+
+@app.route('/private/')
+def private():
+    """Private directory with sensitive data"""
+    return '''
+    <h1>Private Area</h1>
+    <p>Access restricted</p>
+    '''
+
+
+@app.route('/backup/credentials.txt')
+def backup_creds():
+    """Exposed credentials file"""
+    return '''
+admin:admin123
+user1:password
+user2:12345
+# MySQL: root:SuperSecret2024
+'''
+
+
+@app.route('/.git/config')
+def git_config():
+    """Fake git config with credentials"""
+    return '''
+[core]
+    repositoryformatversion = 0
+    filemode = true
+    bare = false
+    logallrefupdates = true
+[remote "origin"]
+    url = https://user:password@github.com/sidhu/webhack.git
+    fetch = +refs/heads/*:refs/remotes/origin/*
+'''
+
+
 @app.errorhandler(404)
 def not_found(error):
-    """Custom 404 page with hidden data"""
     return render_template_string('''
         <h1>404 - Not Found</h1>
         <p>The requested resource was not found.</p>
-        <!-- Debug: Check /api/v1/docs for available endpoints -->
-        <!-- Server: {{ server }} -->
-        <!-- Time: {{ time }} -->
-    '''.format(
-        server=request.headers.get('Server', 'Unknown'),
-        time=time.time()
-    )), 404
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    '''), 404
 
 # ========== VULNERABILITY 2: SQL INJECTION ==========
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Login with SQL injection vulnerability"""
+    """Login with SQL injection vulnerability - FIXED"""
     if request.method == 'POST':
         username = request.form.get('username', '')
         password = request.form.get('password', '')
         client_ip = request.remote_addr
         
-        # VULNERABLE: SQL Injection - direct string interpolation
+        # FIXED: Using parameterized queries to prevent SQL injection
         conn = sqlite3.connect('vulnerable.db')
         c = conn.cursor()
-        query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
+        query = "SELECT * FROM users WHERE username=? AND password=?"
         
         try:
-            c.execute(query)
+            c.execute(query, (username, password))
             user = c.fetchone()
             conn.close()
             
@@ -807,18 +874,18 @@ def register():
     
     return render_template('register.html')
 
-@app.route('/logs')
-def view_logs():
+@app.route('/logs/all', endpoint='logs_all')
+def view_all_logs():
     """VULNERABILITY: Unprotected log viewing endpoint"""
     log_type = request.args.get('type', 'all')
-    
+
     logs_content = ""
     try:
         with open('logs/app.log', 'r') as f:
             logs_content = f.read()
     except:
         logs_content = "No logs available"
-    
+
     # Log poisoning vulnerability: User-Agent already logged
     return f'''<html><body>
     <h2>Application Logs</h2>

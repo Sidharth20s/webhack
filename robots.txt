@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /admin
+Disallow: /backup
+Disallow: /console
+Disallow: /secret
+Disallow: /credentials.txt
